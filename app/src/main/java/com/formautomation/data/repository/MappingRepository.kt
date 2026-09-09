@@ -6,8 +6,8 @@ import com.formautomation.data.database.MappingProfileEntity
 import com.formautomation.domain.model.FieldMapping
 import com.formautomation.domain.model.MappingProfile
 import com.formautomation.domain.model.SuccessIndicator
+import com.formautomation.domain.model.ValidationRule
 import com.google.gson.Gson
-import com.google.gson.reflect.TypeToken
 
 class MappingRepository(
     private val mappingDao: MappingProfileDao,
@@ -70,7 +70,11 @@ class MappingRepository(
 
         val mappings = mappingEntities.map { entity ->
             val validation = entity.validationJson?.let {
-                gson.fromJson(it, com.formautomation.domain.model.ValidationRule::class.java)
+                try {
+                    gson.fromJson(it, ValidationRule::class.java)
+                } catch (e: Exception) {
+                    null
+                }
             }
             FieldMapping(
                 id = entity.id,
@@ -85,7 +89,11 @@ class MappingRepository(
         }.sortedBy { it.order }
 
         val successIndicator = profileEntity.successIndicatorJson?.let {
-            gson.fromJson(it, SuccessIndicator::class.java)
+            try {
+                gson.fromJson(it, SuccessIndicator::class.java)
+            } catch (e: Exception) {
+                null
+            }
         }
 
         return MappingProfile(
@@ -102,40 +110,8 @@ class MappingRepository(
     }
 
     suspend fun getAllProfiles(): List<MappingProfile> {
-        val profiles = mappingDao.getAllProfiles()
-        return profiles.map { profileEntity ->
-            val mappingEntities = mappingDao.getMappings(profileEntity.id)
-            val mappings = mappingEntities.map { entity ->
-                val validation = entity.validationJson?.let {
-                    gson.fromJson(it, com.formautomation.domain.model.ValidationRule::class.java)
-                }
-                FieldMapping(
-                    id = entity.id,
-                    spreadsheetColumn = entity.spreadsheetColumn,
-                    formFieldId = entity.formFieldId,
-                    formFieldName = entity.formFieldName,
-                    fieldType = entity.fieldType,
-                    isRequired = entity.isRequired,
-                    validation = validation,
-                    order = entity.mappingOrder
-                )
-            }.sortedBy { it.order }
-
-            val successIndicator = profileEntity.successIndicatorJson?.let {
-                gson.fromJson(it, SuccessIndicator::class.java)
-            }
-
-            MappingProfile(
-                id = profileEntity.id,
-                name = profileEntity.name,
-                description = profileEntity.description,
-                datasetId = profileEntity.datasetId,
-                mappings = mappings,
-                successIndicator = successIndicator,
-                createdAt = profileEntity.createdAt,
-                updatedAt = profileEntity.updatedAt,
-                isActive = profileEntity.isActive
-            )
+        return mappingDao.getAllProfiles().mapNotNull { profileEntity ->
+            getProfile(profileEntity.id)
         }
     }
 
@@ -160,7 +136,18 @@ class MappingRepository(
 
     suspend fun deleteProfile(id: Long): Result<Unit> {
         return try {
+            mappingDao.deleteMappingsForProfile(id)
             mappingDao.deleteProfile(id)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun activateProfile(profileId: Long): Result<Unit> {
+        return try {
+            mappingDao.deactivateOtherProfiles(profileId)
+            mappingDao.activateProfile(profileId)
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
